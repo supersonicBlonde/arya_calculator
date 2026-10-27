@@ -44,4 +44,3 @@ Ils couvrent les exemples fournis, la correction de l’élément `6 → Métal`
 3. Soumettre `03/03/1994` : résultat adulte `6 Métal`, enfant `5 Terre`.
 4. Vérifier la réception de l’e-mail administratif et son contenu.
 5. Vérifier qu’aucun e-mail n’est reçu par le visiteur.
-6. Remplir le champ honeypot avec les outils du navigateur : le résultat doit apparaître mais aucune notification ne doit être expédiée.

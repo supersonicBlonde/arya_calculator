@@ -10,6 +10,11 @@ defined( 'ABSPATH' ) || exit;
 class Arya_NSK_Plugin {
 
 	/**
+	 * Default consent label displayed when no custom text has been saved.
+	 */
+	const DEFAULT_CONSENT_TEXT = 'Je souhaite recevoir la newsletter d’Arya Slowlife.';
+
+	/**
 	 * Register WordPress hooks.
 	 *
 	 * @return void
@@ -62,7 +67,7 @@ class Arya_NSK_Plugin {
 	}
 
 	/**
-	 * Register the notification email setting.
+	 * Register the plugin settings.
 	 *
 	 * @return void
 	 */
@@ -72,6 +77,15 @@ class Arya_NSK_Plugin {
 			'arya_nsk_notification_email',
 			array(
 				'sanitize_callback' => array( __CLASS__, 'sanitize_notification_email' ),
+				'type'              => 'string',
+			)
+		);
+
+		register_setting(
+			'arya_nsk_settings',
+			'arya_nsk_consent_text',
+			array(
+				'sanitize_callback' => 'sanitize_text_field',
 				'type'              => 'string',
 			)
 		);
@@ -93,6 +107,17 @@ class Arya_NSK_Plugin {
 		}
 
 		return $email;
+	}
+
+	/**
+	 * Get the optional custom consent label.
+	 *
+	 * @return string
+	 */
+	private static function get_consent_text() {
+		$consent_text = trim( (string) get_option( 'arya_nsk_consent_text', '' ) );
+
+		return '' !== $consent_text ? $consent_text : self::DEFAULT_CONSENT_TEXT;
 	}
 
 	/**
@@ -132,6 +157,13 @@ class Arya_NSK_Plugin {
 							<p class="description">Cette adresse reçoit les demandes calculées par le formulaire.</p>
 						</td>
 					</tr>
+					<tr>
+						<th scope="row"><label for="arya_nsk_consent_text">Texte de la case à cocher</label></th>
+						<td>
+							<input class="regular-text" id="arya_nsk_consent_text" name="arya_nsk_consent_text" type="text" value="<?php echo esc_attr( self::get_consent_text() ); ?>" />
+							<p class="description">Ce texte est affiché à côté de la case de consentement du formulaire. Laissez vide pour utiliser le texte par défaut.</p>
+						</td>
+					</tr>
 				</table>
 				<?php submit_button(); ?>
 			</form>
@@ -154,14 +186,10 @@ class Arya_NSK_Plugin {
 		?>
 		<div class="arya_nsk_calculator">
 			<?php self::render_errors( $submission['errors'] ); ?>
+			<?php if ( null === $submission['result'] ) : ?>
 			<form class="arya_nsk_calculator__form" action="" method="post">
 				<?php wp_nonce_field( 'arya_nsk_calculate', 'arya_nsk_nonce' ); ?>
 				<input name="arya_nsk_form" type="hidden" value="1" />
-				<div class="arya_nsk_calculator__honeypot" aria-hidden="true">
-					<label for="arya_nsk_website">Site web</label>
-					<input id="arya_nsk_website" name="arya_nsk_website" type="text" tabindex="-1" autocomplete="off" />
-				</div>
-
 				<p class="arya_nsk_calculator__field">
 					<label for="arya_nsk_first_name">Prénom <span aria-hidden="true">*</span></label>
 					<input id="arya_nsk_first_name" name="arya_nsk_first_name" type="text" value="<?php echo esc_attr( $values['first_name'] ); ?>" autocomplete="given-name" required />
@@ -181,6 +209,7 @@ class Arya_NSK_Plugin {
 				<p class="arya_nsk_calculator__required">Les champs marqués d’un astérisque sont obligatoires.</p>
 				<p><button class="arya_nsk_calculator__submit" type="submit">Découvrir mon profil</button></p>
 			</form>
+			<?php endif; ?>
 			<?php self::render_result( $submission['result'] ); ?>
 		</div>
 		<?php
@@ -218,7 +247,7 @@ class Arya_NSK_Plugin {
 			return $output;
 		}
 
-		$values['first_name'] = isset( $input['arya_nsk_first_name'] ) ? sanitize_text_field( (string) $input['arya_nsk_first_name'] ) : '';
+		$values['first_name'] = isset( $input['arya_nsk_first_name'] ) ? sanitize_text_field( str_replace( array( '<', '>' ), '', (string) $input['arya_nsk_first_name'] ) ) : '';
 		$values['email']      = isset( $input['arya_nsk_email'] ) ? sanitize_email( (string) $input['arya_nsk_email'] ) : '';
 		$values['birth_date'] = isset( $input['arya_nsk_birth_date'] ) ? sanitize_text_field( (string) $input['arya_nsk_birth_date'] ) : '';
 		$values['consent']    = isset( $input['arya_nsk_consent'] ) && '1' === (string) $input['arya_nsk_consent'] ? '1' : '';
@@ -252,11 +281,7 @@ class Arya_NSK_Plugin {
 		}
 
 		$output['result'] = $result;
-		$honeypot          = isset( $input['arya_nsk_website'] ) ? sanitize_text_field( (string) $input['arya_nsk_website'] ) : '';
-
-		if ( '' === $honeypot ) {
-			self::send_notification( $values, $result );
-		}
+		self::send_notification( $values, $result );
 
 		return $output;
 	}
@@ -276,6 +301,7 @@ class Arya_NSK_Plugin {
 		}
 
 		$subject = sprintf( 'Nouvelle demande calculateur — %s', $values['first_name'] );
+		$birth_date = DateTimeImmutable::createFromFormat( '!Y-m-d', $values['birth_date'] );
 		$message = implode(
 			"\n",
 			array(
@@ -283,7 +309,7 @@ class Arya_NSK_Plugin {
 				'',
 				'Prénom : ' . $values['first_name'],
 				'E-mail : ' . $values['email'],
-				'Date de naissance : ' . $values['birth_date'],
+				'Date de naissance : ' . ( $birth_date ? $birth_date->format( 'd/m/Y' ) : $values['birth_date'] ),
 				'',
 				'Chiffre adulte : ' . $result['adult_number'] . ' — ' . $result['adult_element'],
 				'Chiffre enfant : ' . $result['child_number'] . ' — ' . $result['child_element'],
@@ -296,29 +322,12 @@ class Arya_NSK_Plugin {
 	}
 
 	/**
-	 * Output the privacy-consent label.
+	 * Output the consent label.
 	 *
 	 * @return void
 	 */
 	private static function render_consent_label() {
-		$privacy_url = get_privacy_policy_url();
-
-		if ( $privacy_url ) {
-			echo wp_kses(
-				sprintf(
-					'J’accepte d’être recontacté(e) conformément à la <a href="%s">politique de confidentialité</a>. <span aria-hidden="true">*</span>',
-					esc_url( $privacy_url )
-				),
-				array(
-					'a'    => array( 'href' => array() ),
-					'span' => array( 'aria-hidden' => array() ),
-				)
-			);
-
-			return;
-		}
-
-		echo 'J’accepte d’être recontacté(e) conformément à la politique de confidentialité. <span aria-hidden="true">*</span>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Static string.
+		echo esc_html( self::get_consent_text() ) . ' <span aria-hidden="true">*</span>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Asterisk markup is static.
 	}
 
 	/**
@@ -353,6 +362,12 @@ class Arya_NSK_Plugin {
 		if ( null === $result ) {
 			return;
 		}
+
+		$restart_url = get_permalink( get_queried_object_id() );
+
+		if ( ! $restart_url ) {
+			$restart_url = home_url( '/' );
+		}
 		?>
 		<section class="arya_nsk_calculator__result" aria-live="polite">
 			<h2>Votre profil</h2>
@@ -368,6 +383,9 @@ class Arya_NSK_Plugin {
 					<p><?php echo esc_html( (string) $result['child_element'] ); ?></p>
 				</div>
 			</div>
+			<form class="arya_nsk_calculator__restart" action="<?php echo esc_url( $restart_url ); ?>" method="get">
+				<button class="arya_nsk_calculator__submit" type="submit">Recommencer le calcul</button>
+			</form>
 		</section>
 		<?php
 	}
